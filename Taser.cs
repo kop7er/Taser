@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Taser", "Kopter", "1.0.0")]
+    [Info("Taser", "Kopter", "1.0.1")]
     [Description("Transforms a Semi-Automatic Pistol into a Taser")]
 
     public class Taser : RustPlugin
@@ -32,7 +32,7 @@ namespace Oxide.Plugins
         {
             AmmoType = ItemManager.FindItemDefinition("ammo.pistol.hv");
 
-            permission.RegisterPermission(UseTaser, this); 
+            permission.RegisterPermission(UseTaser, this);
             permission.RegisterPermission(TaserAffect, this);
             permission.RegisterPermission(LootTasedPlayer, this);
             permission.RegisterPermission(ReviveTasedPlayer, this);
@@ -42,14 +42,11 @@ namespace Oxide.Plugins
 
         private object OnReloadWeapon(BasePlayer Player, BaseProjectile Projectile)
         {
-            if (permission.UserHasPermission(Player.UserIDString, UseTaser))
+            if (permission.UserHasPermission(Player.UserIDString, UseTaser) && Projectile.ShortPrefabName == "pistol_semiauto.entity")
             {
-                if (Projectile.ShortPrefabName == "pistol_semiauto.entity")
-                {
-                    if (Projectile.primaryMagazine.ammoType == AmmoType) Projectile.primaryMagazine.capacity = 1;
+                if (Projectile.primaryMagazine.ammoType == AmmoType) Projectile.primaryMagazine.capacity = 1;
 
-                    else Projectile.primaryMagazine.capacity = Projectile.primaryMagazine.definition.builtInSize;
-                }
+                else Projectile.primaryMagazine.capacity = Projectile.primaryMagazine.definition.builtInSize;
             }
 
             return null;
@@ -74,21 +71,16 @@ namespace Oxide.Plugins
 
             if (WeaponName == null || WeaponAmmo == null) return null;
 
-            if (WeaponName != "pistol_semiauto.entity") return null;
-
-            if (WeaponAmmo.primaryMagazine.ammoType != AmmoType) return null;
+            if (WeaponName != "pistol_semiauto.entity" || WeaponAmmo.primaryMagazine.ammoType != AmmoType) return null;
 
             var Distance = !HitInfo.IsProjectile() ? (int)Vector3.Distance(HitInfo.PointStart, HitInfo.HitPositionWorld) : (int)HitInfo.ProjectileDistance;
 
-            if (config.MaxDistance > 0)
-            {
-                if (Distance > config.MaxDistance) return null;
-            }
+            if (config.MaxDistance > 0 && Distance > config.MaxDistance) return null;
 
             Victim.StartWounded();
             WoundedPlayers.Add(Victim.userID);
 
-            if (config.PlayScream) 
+            if (config.PlayScream)
             {
                 Effect.server.Run(ScreamSound, Victim.transform.position);
 
@@ -110,17 +102,17 @@ namespace Oxide.Plugins
             return false;
         }
 
-        bool CanLootPlayer(BasePlayer Target, BasePlayer Looter)
+        private object CanLootPlayer(BasePlayer Target, BasePlayer Looter)
         {
             if (WoundedPlayers.Contains(Target.userID))
             {
                 if (config.LootPermissionNeeded && !permission.UserHasPermission(Looter.UserIDString, LootTasedPlayer)) return false;
             }
 
-            return true;
+            return null;
         }
 
-        object OnPlayerAssist(BasePlayer Target, BasePlayer Player)
+        private object OnPlayerAssist(BasePlayer Target, BasePlayer Player)
         {
             if (WoundedPlayers.Contains(Target.userID))
             {
@@ -170,7 +162,7 @@ namespace Oxide.Plugins
                     LoadDefaultConfig();
                 }
             }
-            
+
             catch
             {
                 PrintError("Configuration file is corrupt, check your config file at https://jsonlint.com/!");
