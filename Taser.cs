@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Taser", "Kopter", "1.0.1")]
+    [Info("Taser", "Kopter", "1.0.2")]
     [Description("Transforms a Semi-Automatic Pistol into a Taser")]
 
     public class Taser : RustPlugin
@@ -77,7 +77,7 @@ namespace Oxide.Plugins
 
             if (config.MaxDistance > 0 && Distance > config.MaxDistance) return null;
 
-            Victim.StartWounded();
+            Victim.BecomeWounded();
             WoundedPlayers.Add(Victim.userID);
 
             if (config.PlayScream)
