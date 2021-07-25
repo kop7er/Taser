@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Taser", "Kopter", "1.0.2")]
+    [Info("Taser", "Kopter", "1.0.3")]
     [Description("Transforms a Semi-Automatic Pistol into a Taser")]
 
     public class Taser : RustPlugin
@@ -73,9 +73,7 @@ namespace Oxide.Plugins
 
             if (WeaponName != "pistol_semiauto.entity" || WeaponAmmo.primaryMagazine.ammoType != AmmoType) return null;
 
-            var Distance = !HitInfo.IsProjectile() ? (int)Vector3.Distance(HitInfo.PointStart, HitInfo.HitPositionWorld) : (int)HitInfo.ProjectileDistance;
-
-            if (config.MaxDistance > 0 && Distance > config.MaxDistance) return null;
+            if (config.MaxDistance > 0 && (!HitInfo.IsProjectile() ? (int)Vector3.Distance(HitInfo.PointStart, HitInfo.HitPositionWorld) : (int)HitInfo.ProjectileDistance) > config.MaxDistance) return null;
 
             Victim.BecomeWounded();
             WoundedPlayers.Add(Victim.userID);
@@ -94,7 +92,7 @@ namespace Oxide.Plugins
 
             timer.Once(config.WoundedTime, () =>
             {
-                Victim.StopWounded();
+                if (Victim != null) Victim.StopWounded();
                 WoundedPlayers.Remove(Victim.userID);
                 if (ScreamSoundTimer != null) ScreamSoundTimer.Destroy();
             });
