@@ -1,28 +1,33 @@
 ﻿using Newtonsoft.Json;
+
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Taser", "Kopter", "1.0.3")]
+    [Info("Taser", "Kopter", "2.0.0")]
     [Description("Transforms a Semi-Automatic Pistol into a Taser")]
 
     public class Taser : RustPlugin
     {
         #region Variables
 
-        ItemDefinition AmmoType;
+        private ItemDefinition ammoType;
 
-        Timer ScreamSoundTimer;
+        private const string useTaserPermission = "taser.use";
 
-        List<ulong> WoundedPlayers = new List<ulong>();
+        private const string taserAffectPermission = "taser.affect";
 
-        private const string UseTaser = "taser.use";
-        private const string TaserAffect = "taser.affect";
-        private const string LootTasedPlayer = "taser.loot";
-        private const string ReviveTasedPlayer = "taser.revive";
+        private const string lootPlayerPermission = "taser.loot";
 
-        private string ScreamSound = "assets/bundled/prefabs/fx/player/beartrap_scream.prefab";
+        private const string revivePlayerPermission = "taser.revive";
+
+        private const string semiAutoPistolShortname = "pistol_semiauto.entity";
+
+        private const string screamSound = "assets/bundled/prefabs/fx/player/beartrap_scream.prefab";
+
+        private const string shockEffect = "assets/prefabs/locks/keypad/effects/lock.code.shock.prefab";
+
+        private List<ulong> woundedPlayers = new List<ulong> { };
 
         #endregion
 
@@ -30,94 +35,109 @@ namespace Oxide.Plugins
 
         private void Init()
         {
-            AmmoType = ItemManager.FindItemDefinition("ammo.pistol.hv");
+            ammoType = ItemManager.FindItemDefinition("ammo.pistol.hv");
 
-            permission.RegisterPermission(UseTaser, this);
-            permission.RegisterPermission(TaserAffect, this);
-            permission.RegisterPermission(LootTasedPlayer, this);
-            permission.RegisterPermission(ReviveTasedPlayer, this);
+            permission.RegisterPermission(useTaserPermission, this);
+            permission.RegisterPermission(taserAffectPermission, this);
+            permission.RegisterPermission(lootPlayerPermission, this);
+            permission.RegisterPermission(revivePlayerPermission, this);
 
-            WoundedPlayers.Clear();
+            woundedPlayers.Clear();
         }
 
-        private object OnReloadWeapon(BasePlayer Player, BaseProjectile Projectile)
+        private void OnReloadWeapon(BasePlayer player, BaseProjectile projectile)
         {
-            if (permission.UserHasPermission(Player.UserIDString, UseTaser) && Projectile.ShortPrefabName == "pistol_semiauto.entity")
-            {
-                if (Projectile.primaryMagazine.ammoType == AmmoType) Projectile.primaryMagazine.capacity = 1;
+            if (player == null || !permission.UserHasPermission(player.UserIDString, useTaserPermission) || projectile == null || projectile.ShortPrefabName != semiAutoPistolShortname)
+                return;
 
-                else Projectile.primaryMagazine.capacity = Projectile.primaryMagazine.definition.builtInSize;
-            }
+            if (projectile.primaryMagazine.ammoType == ammoType) projectile.primaryMagazine.capacity = config.numberOfRounds;
 
-            return null;
+            else projectile.primaryMagazine.capacity = projectile.primaryMagazine.definition.builtInSize;
         }
 
-        private object OnEntityTakeDamage(BaseCombatEntity Entity, HitInfo HitInfo)
+        private object OnEntityTakeDamage(BasePlayer victim, HitInfo hitInfo)
         {
-            if (Entity == null || !(Entity as BasePlayer) || HitInfo == null) return null;
+            if (victim == null || victim.IsNpc || (config.affectPermissionNeeded && permission.UserHasPermission(victim.UserIDString, taserAffectPermission)) || hitInfo == null) 
+                return null;
 
-            var Attacker = HitInfo.InitiatorPlayer;
-            var Victim = HitInfo.HitEntity as BasePlayer;
+            if (woundedPlayers.Contains(victim.userID)) 
+                return false;
 
-            if (Attacker == null || Victim == null || Victim.IsNpc) return null;
+            var weaponName = hitInfo.WeaponPrefab?.ShortPrefabName;
 
-            if (WoundedPlayers.Contains(Victim.userID)) return false;
+            if (weaponName == null || weaponName != semiAutoPistolShortname)
+                return null;
 
-            if (!permission.UserHasPermission(Attacker.UserIDString, UseTaser)) return null;
-            if (!permission.UserHasPermission(Victim.UserIDString, TaserAffect) && config.AffectPermissionNeeded) return null;
+            var weaponAmmo = hitInfo.Weapon as BaseProjectile;
 
-            var WeaponName = HitInfo.WeaponPrefab.ShortPrefabName;
-            var WeaponAmmo = HitInfo.Weapon as BaseProjectile;
+            if (weaponAmmo == null || weaponAmmo.primaryMagazine.ammoType != ammoType)
+                return null;
 
-            if (WeaponName == null || WeaponAmmo == null) return null;
+            var attacker = victim.lastAttacker as BasePlayer ?? hitInfo.InitiatorPlayer;
 
-            if (WeaponName != "pistol_semiauto.entity" || WeaponAmmo.primaryMagazine.ammoType != AmmoType) return null;
+            if (attacker == null || !permission.UserHasPermission(attacker.UserIDString, useTaserPermission))
+                return null;
 
-            if (config.MaxDistance > 0 && (!HitInfo.IsProjectile() ? (int)Vector3.Distance(HitInfo.PointStart, HitInfo.HitPositionWorld) : (int)HitInfo.ProjectileDistance) > config.MaxDistance) return null;
+            if (config.maxDistance > 0 && (int)hitInfo.ProjectileDistance > config.maxDistance)
+                return false;
 
-            Victim.BecomeWounded();
-            WoundedPlayers.Add(Victim.userID);
+            victim.BecomeWounded();
 
-            if (config.PlayScream)
+            woundedPlayers.Add(victim.userID);
+
+            Effect.server.Run(shockEffect, victim.GetNetworkPosition());
+
+            Timer screamSoundTimer = null;
+
+            if (config.playScream)
             {
-                Effect.server.Run(ScreamSound, Victim.transform.position);
+                Effect.server.Run(screamSound, victim.transform.position);
 
-                ScreamSoundTimer = timer.Every(3f, () =>
+                screamSoundTimer = timer.Every(4f, () =>
                 {
-                    if (Victim == null) ScreamSoundTimer.Destroy();
+                    if (victim == null || !woundedPlayers.Contains(victim.userID)) screamSoundTimer?.Destroy();
 
-                    else Effect.server.Run(ScreamSound, Victim.transform.position);
+                    else Effect.server.Run(screamSound, victim.transform.position);
                 });
             }
 
-            timer.Once(config.WoundedTime, () =>
+            timer.Once(config.woundedTime, () =>
             {
-                if (Victim != null) Victim.StopWounded();
-                WoundedPlayers.Remove(Victim.userID);
-                if (ScreamSoundTimer != null) ScreamSoundTimer.Destroy();
+                victim?.StopWounded();
+
+                woundedPlayers.Remove(victim.userID);
+
+                screamSoundTimer?.Destroy();
             });
 
             return false;
         }
 
-        private object CanLootPlayer(BasePlayer Target, BasePlayer Looter)
+        private object CanLootPlayer(BasePlayer target, BasePlayer looter)
         {
-            if (WoundedPlayers.Contains(Target.userID))
-            {
-                if (config.LootPermissionNeeded && !permission.UserHasPermission(Looter.UserIDString, LootTasedPlayer)) return false;
-            }
+            if (config.lootPermissionNeeded && woundedPlayers.Contains(target.userID) && !permission.UserHasPermission(looter.UserIDString, lootPlayerPermission)) 
+                return false;
 
             return null;
         }
 
-        private object OnPlayerAssist(BasePlayer Target, BasePlayer Player)
+        private object OnPlayerAssist(BasePlayer target, BasePlayer reviver)
         {
-            if (WoundedPlayers.Contains(Target.userID))
-            {
-                if (config.RevivePermissionNeeded && !permission.UserHasPermission(Player.UserIDString, LootTasedPlayer)) return false;
-            }
+            if (config.revivePermissionNeeded && woundedPlayers.Contains(target.userID) && !permission.UserHasPermission(reviver.UserIDString, revivePlayerPermission)) 
+                return false;
 
             return null;
+        }
+
+        private void Unload()
+        {
+            ammoType = null;
+
+            foreach (var player in BasePlayer.activePlayerList)
+                if (woundedPlayers.Contains(player.userID) && player.IsWounded())
+                    player.StopWounded();
+
+            woundedPlayers.Clear();
         }
 
         #endregion
@@ -128,23 +148,26 @@ namespace Oxide.Plugins
 
         private class ConfigData
         {
+            [JsonProperty(PropertyName = "Number Of Taser Rounds")]
+            public int numberOfRounds = 1;
+
             [JsonProperty(PropertyName = "Wounded Time (In Seconds)")]
-            public float WoundedTime = 10;
+            public float woundedTime = 10;
 
-            [JsonProperty(PropertyName = "Max Distance where the Taser will work (If 0, a max distance will no be applied)")]
-            public int MaxDistance = 0;
+            [JsonProperty(PropertyName = "Max Distance where the Taser will work (If 0, a max distance will not be applied)")]
+            public int maxDistance = 0;
 
-            [JsonProperty(PropertyName = "Play a Scream Sound while the player is down")]
-            public bool PlayScream = false;
+            [JsonProperty(PropertyName = "Play a Scream Sound while the player is tased")]
+            public bool playScream = false;
 
             [JsonProperty(PropertyName = "Requires a permission to be affected by the taser")]
-            public bool AffectPermissionNeeded = false;
+            public bool affectPermissionNeeded = false;
 
             [JsonProperty(PropertyName = "Requires permission to loot a player affected by the taser")]
-            public bool LootPermissionNeeded = true;
+            public bool lootPermissionNeeded = true;
 
             [JsonProperty(PropertyName = "Requires permission to revive a player affected by the taser")]
-            public bool RevivePermissionNeeded = true;
+            public bool revivePermissionNeeded = true;
         }
 
         protected override void LoadConfig()
@@ -155,10 +178,7 @@ namespace Oxide.Plugins
             {
                 config = Config.ReadObject<ConfigData>();
 
-                if (config == null)
-                {
-                    LoadDefaultConfig();
-                }
+                if (config == null) LoadDefaultConfig();
             }
 
             catch
@@ -171,16 +191,10 @@ namespace Oxide.Plugins
             SaveConfig();
         }
 
-        protected override void LoadDefaultConfig()
-        {
-            config = new ConfigData();
-        }
+        protected override void LoadDefaultConfig() => config = new ConfigData();
 
-        protected override void SaveConfig()
-        {
-            Config.WriteObject(config);
-        }
-
+        protected override void SaveConfig() => Config.WriteObject(config);
+        
         #endregion
     }
 }
