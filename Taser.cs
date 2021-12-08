@@ -85,7 +85,7 @@ namespace Oxide.Plugins
 
             woundedPlayers.Add(victim.userID);
 
-            Effect.server.Run(shockEffect, victim.GetNetworkPosition());
+            Effect.server.Run(shockEffect, hitInfo.HitPositionWorld);
 
             Timer screamSoundTimer = null;
 
