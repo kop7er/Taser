@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace Oxide.Plugins
 {
-    [Info("Taser", "Kopter", "2.0.0")]
+    [Info("Taser", "Kopter", "2.0.1")]
     [Description("Transforms a Semi-Automatic Pistol into a Taser")]
 
     public class Taser : RustPlugin
@@ -45,7 +45,7 @@ namespace Oxide.Plugins
             woundedPlayers.Clear();
         }
 
-        private void OnReloadWeapon(BasePlayer player, BaseProjectile projectile)
+        private void OnWeaponReload(BaseProjectile projectile, BasePlayer player)
         {
             if (player == null || !permission.UserHasPermission(player.UserIDString, useTaserPermission) || projectile == null || projectile.ShortPrefabName != semiAutoPistolShortname)
                 return;
