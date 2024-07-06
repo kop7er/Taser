@@ -1,17 +1,17 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 
 using System.Collections.Generic;
 
 namespace Oxide.Plugins
 {
-    [Info("Taser", "Kopter", "2.0.1")]
+    [Info("Taser", "Kopter", "2.0.2")]
     [Description("Transforms a Semi-Automatic Pistol into a Taser")]
 
     public class Taser : RustPlugin
     {
         #region Variables
 
-        private ItemDefinition ammoType;
+        private ItemDefinition taserAmmoType;
 
         private const string useTaserPermission = "taser.use";
 
@@ -35,7 +35,7 @@ namespace Oxide.Plugins
 
         private void Init()
         {
-            ammoType = ItemManager.FindItemDefinition("ammo.pistol.hv");
+            taserAmmoType = ItemManager.FindItemDefinition("ammo.pistol.hv");
 
             permission.RegisterPermission(useTaserPermission, this);
             permission.RegisterPermission(taserAffectPermission, this);
@@ -47,20 +47,29 @@ namespace Oxide.Plugins
 
         private void OnWeaponReload(BaseProjectile projectile, BasePlayer player)
         {
-            if (player == null || !permission.UserHasPermission(player.UserIDString, useTaserPermission) || projectile == null || projectile.ShortPrefabName != semiAutoPistolShortname)
+            if (projectile == null || player == null)
                 return;
 
-            if (projectile.primaryMagazine.ammoType == ammoType) projectile.primaryMagazine.capacity = config.numberOfRounds;
+            if (!permission.UserHasPermission(player.UserIDString, useTaserPermission))
+                return;
 
-            else projectile.primaryMagazine.capacity = projectile.primaryMagazine.definition.builtInSize;
+            if (projectile.ShortPrefabName != semiAutoPistolShortname)
+                return;
+
+            projectile.primaryMagazine.capacity = (projectile.primaryMagazine.ammoType == taserAmmoType)
+                ? config.NumberOfRounds
+                : projectile.primaryMagazine.definition.builtInSize;
         }
 
         private object OnEntityTakeDamage(BasePlayer victim, HitInfo hitInfo)
         {
-            if (victim == null || victim.IsNpc || (config.affectPermissionNeeded && permission.UserHasPermission(victim.UserIDString, taserAffectPermission)) || hitInfo == null) 
+            if (victim == null || victim.IsNpc || hitInfo == null)
                 return null;
 
-            if (woundedPlayers.Contains(victim.userID)) 
+            if (config.AffectPermissionNeeded && !permission.UserHasPermission(victim.UserIDString, taserAffectPermission))
+                return null;
+
+            if (woundedPlayers.Contains(victim.userID))
                 return false;
 
             var weaponName = hitInfo.WeaponPrefab?.ShortPrefabName;
@@ -70,7 +79,7 @@ namespace Oxide.Plugins
 
             var weaponAmmo = hitInfo.Weapon as BaseProjectile;
 
-            if (weaponAmmo == null || weaponAmmo.primaryMagazine.ammoType != ammoType)
+            if (weaponAmmo == null || weaponAmmo.primaryMagazine.ammoType != taserAmmoType)
                 return null;
 
             var attacker = victim.lastAttacker as BasePlayer ?? hitInfo.InitiatorPlayer;
@@ -78,7 +87,7 @@ namespace Oxide.Plugins
             if (attacker == null || !permission.UserHasPermission(attacker.UserIDString, useTaserPermission))
                 return null;
 
-            if (config.maxDistance > 0 && (int)hitInfo.ProjectileDistance > config.maxDistance)
+            if (config.MaxDistance > 0 && (int)hitInfo.ProjectileDistance > config.MaxDistance)
                 return false;
 
             victim.BecomeWounded();
@@ -89,23 +98,24 @@ namespace Oxide.Plugins
 
             Timer screamSoundTimer = null;
 
-            if (config.playScream)
+            if (config.PlayScream)
             {
                 Effect.server.Run(screamSound, victim.transform.position);
 
                 screamSoundTimer = timer.Every(4f, () =>
                 {
-                    if (victim == null || !woundedPlayers.Contains(victim.userID)) screamSoundTimer?.Destroy();
+                    if (victim == null || !woundedPlayers.Contains(victim.userID.Get()))
+                        screamSoundTimer?.Destroy();
 
                     else Effect.server.Run(screamSound, victim.transform.position);
                 });
             }
 
-            timer.Once(config.woundedTime, () =>
+            timer.Once(config.WoundedTime, () =>
             {
                 victim?.StopWounded();
 
-                woundedPlayers.Remove(victim.userID);
+                woundedPlayers.Remove(victim.userID.Get());
 
                 screamSoundTimer?.Destroy();
             });
@@ -115,7 +125,13 @@ namespace Oxide.Plugins
 
         private object CanLootPlayer(BasePlayer target, BasePlayer looter)
         {
-            if (config.lootPermissionNeeded && woundedPlayers.Contains(target.userID) && !permission.UserHasPermission(looter.UserIDString, lootPlayerPermission)) 
+            if (target == null || looter == null)
+                return null;
+
+            if (!woundedPlayers.Contains(target.userID.Get()))
+                return null;
+
+            if (config.LootPermissionNeeded && !permission.UserHasPermission(looter.UserIDString, lootPlayerPermission))
                 return false;
 
             return null;
@@ -123,18 +139,26 @@ namespace Oxide.Plugins
 
         private object OnPlayerAssist(BasePlayer target, BasePlayer reviver)
         {
-            if (config.revivePermissionNeeded && woundedPlayers.Contains(target.userID) && !permission.UserHasPermission(reviver.UserIDString, revivePlayerPermission)) 
+            if (target == null || reviver == null)
+                return null;
+
+            if (!woundedPlayers.Contains(target.userID.Get()))
+                return null;
+
+            if (config.RevivePermissionNeeded && !permission.UserHasPermission(reviver.UserIDString, revivePlayerPermission))
                 return false;
+
+            woundedPlayers.Remove(target.userID.Get());
 
             return null;
         }
 
         private void Unload()
         {
-            ammoType = null;
+            taserAmmoType = null;
 
             foreach (var player in BasePlayer.activePlayerList)
-                if (woundedPlayers.Contains(player.userID) && player.IsWounded())
+                if (woundedPlayers.Contains(player.userID.Get()) && player.IsWounded())
                     player.StopWounded();
 
             woundedPlayers.Clear();
@@ -149,25 +173,25 @@ namespace Oxide.Plugins
         private class ConfigData
         {
             [JsonProperty(PropertyName = "Number Of Taser Rounds")]
-            public int numberOfRounds = 1;
+            public int NumberOfRounds = 1;
 
             [JsonProperty(PropertyName = "Wounded Time (In Seconds)")]
-            public float woundedTime = 10;
+            public float WoundedTime = 10;
 
             [JsonProperty(PropertyName = "Max Distance where the Taser will work (If 0, a max distance will not be applied)")]
-            public int maxDistance = 0;
+            public int MaxDistance = 0;
 
             [JsonProperty(PropertyName = "Play a Scream Sound while the player is tased")]
-            public bool playScream = false;
+            public bool PlayScream = false;
 
             [JsonProperty(PropertyName = "Requires a permission to be affected by the taser")]
-            public bool affectPermissionNeeded = false;
+            public bool AffectPermissionNeeded = false;
 
             [JsonProperty(PropertyName = "Requires permission to loot a player affected by the taser")]
-            public bool lootPermissionNeeded = true;
+            public bool LootPermissionNeeded = true;
 
             [JsonProperty(PropertyName = "Requires permission to revive a player affected by the taser")]
-            public bool revivePermissionNeeded = true;
+            public bool RevivePermissionNeeded = true;
         }
 
         protected override void LoadConfig()
@@ -178,7 +202,8 @@ namespace Oxide.Plugins
             {
                 config = Config.ReadObject<ConfigData>();
 
-                if (config == null) LoadDefaultConfig();
+                if (config == null)
+                    LoadDefaultConfig();
             }
 
             catch
@@ -194,7 +219,7 @@ namespace Oxide.Plugins
         protected override void LoadDefaultConfig() => config = new ConfigData();
 
         protected override void SaveConfig() => Config.WriteObject(config);
-        
+
         #endregion
     }
 }
